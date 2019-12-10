@@ -1,10 +1,12 @@
 use ndarray::{ArrayView1, ArrayView2};
 use petal_neighbors::BallTree;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::Fit;
 
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Optics {
     pub eps: f64,
     pub min_samples: usize,
@@ -174,7 +176,7 @@ fn update<'a>(
     });
 }
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 struct Neighborhood {
     pub neighbors: Vec<usize>,
     pub core_distance: f64,
