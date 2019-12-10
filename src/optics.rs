@@ -8,6 +8,9 @@ use super::Fit;
 pub struct Optics {
     pub eps: f64,
     pub min_samples: usize,
+    neighborhoods: Vec<Neighborhood>,
+    ordered: Vec<usize>,
+    reacheability: Vec<f64>,
 }
 
 impl Default for Optics {
@@ -15,13 +18,51 @@ impl Default for Optics {
         Self {
             eps: 0.5,
             min_samples: 5,
+            neighborhoods: vec![],
+            ordered: vec![],
+            reacheability: vec![],
         }
     }
 }
 
 impl Optics {
     pub fn new(eps: f64, min_samples: usize) -> Self {
-        Self { eps, min_samples }
+        Self {
+            eps,
+            min_samples,
+            neighborhoods: vec![],
+            ordered: vec![],
+            reacheability: vec![],
+        }
+    }
+
+    pub fn extract_clusters_and_outliers(
+        &self,
+        eps: f64,
+    ) -> (HashMap<usize, Vec<usize>>, Vec<usize>) {
+        let mut outliers = vec![];
+        let mut clusters: HashMap<usize, Vec<usize>> = HashMap::new();
+
+        for &id in &self.ordered {
+            if self.reacheability[id].is_normal() && self.reacheability[id] <= eps {
+                if clusters.is_empty() {
+                    outliers.push(id);
+                } else {
+                    let v = clusters
+                        .get_mut(&(clusters.len() - 1))
+                        .expect("cluster map crashed");
+                    v.push(id);
+                }
+            } else {
+                let n = &self.neighborhoods[id];
+                if n.neighbors.len() >= self.min_samples && n.core_distance <= eps {
+                    clusters.entry(clusters.len()).or_insert_with(|| vec![id]);
+                } else {
+                    outliers.push(id);
+                }
+            }
+        }
+        (clusters, outliers)
     }
 }
 
@@ -33,11 +74,11 @@ impl<'a> Fit<'a> for Optics {
         if input.is_empty() {
             return (HashMap::new(), vec![]);
         }
-        let neighborhoods = build_neighborhoods(&input, self.eps);
+        self.neighborhoods = build_neighborhoods(&input, self.eps);
         let mut visited = vec![false; input.nrows()];
-        let mut ordered: Vec<usize> = Vec::with_capacity(input.nrows());
-        let mut reacheability = vec![std::f64::NAN; input.nrows()];
-        for (idx, n) in neighborhoods.iter().enumerate() {
+        self.ordered = Vec::with_capacity(input.nrows());
+        self.reacheability = vec![std::f64::NAN; input.nrows()];
+        for (idx, n) in self.neighborhoods.iter().enumerate() {
             if visited[idx] || n.neighbors.len() < self.min_samples {
                 continue;
             }
@@ -45,52 +86,14 @@ impl<'a> Fit<'a> for Optics {
                 idx,
                 &input,
                 self.min_samples,
-                &neighborhoods,
-                &mut ordered,
-                &mut reacheability,
+                &self.neighborhoods,
+                &mut self.ordered,
+                &mut self.reacheability,
                 &mut visited,
             );
         }
-        extract_clusters_and_outliers(
-            &ordered,
-            &reacheability,
-            &neighborhoods,
-            self.eps,
-            self.min_samples,
-        )
+        self.extract_clusters_and_outliers(self.eps)
     }
-}
-
-fn extract_clusters_and_outliers(
-    ordered: &[usize],
-    reacheability: &[f64],
-    neighborhoods: &[Neighborhood],
-    eps: f64,
-    min_samples: usize,
-) -> (HashMap<usize, Vec<usize>>, Vec<usize>) {
-    let mut outliers = vec![];
-    let mut clusters: HashMap<usize, Vec<usize>> = HashMap::new();
-
-    for &id in ordered {
-        if reacheability[id].is_normal() && reacheability[id] <= eps {
-            if clusters.is_empty() {
-                outliers.push(id);
-            } else {
-                let v = clusters
-                    .get_mut(&(clusters.len() - 1))
-                    .expect("cluster map crashed");
-                v.push(id);
-            }
-        } else {
-            let n = &neighborhoods[id];
-            if n.neighbors.len() >= min_samples && n.core_distance <= eps {
-                clusters.entry(clusters.len()).or_insert_with(|| vec![id]);
-            } else {
-                outliers.push(id);
-            }
-        }
-    }
-    (clusters, outliers)
 }
 
 fn process<'a>(
